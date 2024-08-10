@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {  Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CreateUserDto } from 'src/dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { subYears } from 'date-fns';
+import { CacheService } from 'src/cache/cache.service';
 
 @Injectable()
 export class UsersService {
@@ -11,36 +12,41 @@ export class UsersService {
   constructor(
     @InjectModel('User') private readonly userModel: Model<any>,
     @InjectModel('BlockUser') private readonly blockUserModel: Model<any>,
+    private readonly catchService: CacheService
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<any> {
     const createdUser = new this.userModel(createUserDto);
+    this.catchService.markInvaliCatch()
     return createdUser.save();
   }
 
   async searchUser(loginUsername:string, payload: any): Promise<any[]> {
-    const query:any ={}
-    if (payload) {
-      const { username, minAge, maxAge } = payload;
-      const data = await this.blockUserModel.find({username:loginUsername}).exec()
-      const blockUsers = data.map(d=>d.blockUsername)
-      query['username'] = {  $nin: blockUsers }
-      // Calculate the date ranges based on the age
-      const today = new Date();
-      if (minAge !== null || maxAge !== null) {
-        query.birthdate={}
-        if (minAge !== null) {
-          const minDate = subYears(today, minAge);
-          query.birthdate['$lte'] = minDate;
+    return this.catchService.makeCachable(`search_${loginUsername}`, async ()=>{
+      const query:any ={}
+      if (payload) {
+        const { username, minAge, maxAge } = payload;
+        const data = await this.blockUserModel.find({username:loginUsername}).exec()
+        const blockUsers = data.map(d=>d.blockUsername)
+        query['username'] = {  $nin: blockUsers }
+        // Calculate the date ranges based on the age
+        const today = new Date();
+        if (minAge !== null || maxAge !== null) {
+          query.birthdate={}
+          if (minAge !== null) {
+            const minDate = subYears(today, minAge);
+            query.birthdate['$lte'] = minDate;
+          }
+          if (maxAge !== null) {
+            const maxDate = subYears(today, maxAge);
+            query.birthdate['$gte'] = maxDate;
+          }
         }
-        if (maxAge !== null) {
-          const maxDate = subYears(today, maxAge);
-          query.birthdate['$gte'] = maxDate;
-        }
+        if (username) query.username['$regex'] = new RegExp(username, 'i')
       }
-      if (username) query.username['$regex'] = new RegExp(username, 'i')
-    }
-    return await this.userModel.find(query).exec();
+      return await this.userModel.find(query).exec();
+    })
+    
   }
 
 
@@ -63,12 +69,13 @@ export class UsersService {
     if (!existingUser) {
       throw new NotFoundException(`User with username "${username}" not found`);
     }
-
+    this.catchService.markInvaliCatch()
     return existingUser
   }
 
   async remove(username: string): Promise<void> {
     const result = await this.userModel.deleteOne({ username }).exec();
+    this.catchService.markInvaliCatch()
     if (result.deletedCount === 0) {
       throw new NotFoundException(`User with username "${username}" not found`);
     }
