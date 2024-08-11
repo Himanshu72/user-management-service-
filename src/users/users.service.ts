@@ -5,6 +5,7 @@ import { CreateUserDto } from 'src/dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { subYears } from 'date-fns';
 import { CacheService } from 'src/cache/cache.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
@@ -21,8 +22,16 @@ export class UsersService {
     return createdUser.save();
   }
 
+  private generateCacheKey(payload: object): string {
+    const payloadString = JSON.stringify(payload);
+    return crypto.createHash('sha256').update(payloadString).digest('hex');
+}
+
   async searchUser(loginUsername:string, payload: any): Promise<any[]> {
-    return this.catchService.makeCachable(`search_${loginUsername}`, async ()=>{
+
+    const key = this.generateCacheKey({loginUsername, ...payload}) // will reutn same key for same type of payload
+
+    return this.catchService.makeCachable(key, async ()=>{
       const query:any ={}
       if (payload) {
         const { username, minAge, maxAge } = payload;
